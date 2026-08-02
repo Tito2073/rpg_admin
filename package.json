@@ -1,0 +1,28 @@
+{
+  "name": "rpg-turno-admin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ferramenta administrativa para o RPG infantil por turnos.",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon --watch src --watch prisma --watch scripts --ignore .adminjs --ignore node_modules src/server.js",
+    "start": "node src/server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:push": "prisma db push",
+    "prisma:seed": "node prisma/seed.js",
+    "import:game": "node src/cli/import-game.js",
+    "export:game": "node src/cli/export-game.js"
+  },
+  "dependencies": {
+    "@adminjs/express": "^6.1.0",
+    "@adminjs/prisma": "^5.0.1",
+    "@prisma/client": "^6.12.0",
+    "adminjs": "^7.8.17",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14",
+    "prisma": "^6.12.0"
+  }
+}

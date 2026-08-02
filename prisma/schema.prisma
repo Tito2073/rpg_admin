@@ -1,0 +1,443 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum AssetKind {
+  autotile
+  battler
+  character
+  selfie
+  battleback
+  icon
+  decoration
+  block
+  misc
+}
+
+enum StoryNodeType {
+  intro
+  objective
+  dialogue
+  event
+  outro
+}
+
+enum MapObjectKind {
+  npc
+  hostile
+  block
+  decoration
+  entry
+  exit
+  trigger
+}
+
+model Asset {
+  id             String              @id @default(cuid())
+  key            String              @unique
+  kind           AssetKind
+  fileName       String
+  relativePath   String
+  width          Int?
+  height         Int?
+  metaJson       String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  actionEntries  ActionCatalogEntry[]
+  classEntries   ClassCatalogEntry[]
+  heroBattlers   HeroCatalogEntry[]  @relation("HeroBattlerAsset")
+  heroCharacters HeroCatalogEntry[]  @relation("HeroCharacterAsset")
+  heroSelfies    HeroCatalogEntry[]  @relation("HeroSelfieAsset")
+  unitEntries    UnitCatalogEntry[]
+  npcBattlers    NpcCatalogEntry[]   @relation("NpcBattlerAsset")
+  npcCharacters  NpcCatalogEntry[]   @relation("NpcCharacterAsset")
+  npcSelfies     NpcCatalogEntry[]   @relation("NpcSelfieAsset")
+  hostileBattlers   HostileCatalogEntry[] @relation("HostileBattlerAsset")
+  hostileCharacters HostileCatalogEntry[] @relation("HostileCharacterAsset")
+  hostileSelfies    HostileCatalogEntry[] @relation("HostileSelfieAsset")
+  mapObjects     MapObject[]
+  mapTypes       MapType[]           @relation("MapTypeAutotile")
+  battlebacks    Story[]             @relation("StoryBattleback")
+}
+
+model MapType {
+  id              String      @id @default(cuid())
+  slug            String      @unique
+  name            String
+  obstacleGroup   String?
+  decorationGroup String?
+  autotileAssetId String
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  autotileAsset   Asset       @relation("MapTypeAutotile", fields: [autotileAssetId], references: [id])
+  maps            GameMap[]
+  storyPhases     StoryPhase[]
+}
+
+model GameMap {
+  id              String      @id @default(cuid())
+  slug            String      @unique
+  title           String
+  width           Int
+  height          Int
+  tileSize        Int         @default(32)
+  tilesetMode     String      @default("autotile")
+  mapTypeId       String?
+  layerGroundJson String
+  layerMidJson    String
+  layerTopJson    String
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  mapType         MapType?    @relation(fields: [mapTypeId], references: [id])
+  objects         MapObject[]
+  storyPhases     StoryPhase[]
+}
+
+model MapObject {
+  id          String            @id @default(cuid())
+  mapId       String
+  objectKind  MapObjectKind
+  x           Int
+  y           Int
+  zIndex      Int               @default(0)
+  label       String?
+  dataJson    String?
+  npcId       String?
+  hostileId   String?
+  assetId     String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  map         GameMap           @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  npc         NpcCatalogEntry?  @relation(fields: [npcId], references: [id])
+  hostile     HostileCatalogEntry? @relation(fields: [hostileId], references: [id])
+  asset       Asset?            @relation(fields: [assetId], references: [id])
+}
+
+model Story {
+  id                String      @id @default(cuid())
+  slug              String      @unique
+  title             String
+  summary           String?
+  startPhaseId      String?
+  enemyName         String?
+  battlebackAssetId String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  battlebackAsset   Asset?      @relation("StoryBattleback", fields: [battlebackAssetId], references: [id])
+  phases            StoryPhase[]
+}
+
+model StoryPhase {
+  id                 String              @id @default(cuid())
+  storyId            String
+  slug               String
+  title              String
+  position           Int                 @default(0)
+  hostile            Boolean             @default(false)
+  hostileIntroText   String?
+  hostileRespawnJson String?
+  mapTypeId          String?
+  mapId              String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  story              Story               @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  mapType            MapType?            @relation(fields: [mapTypeId], references: [id])
+  map                GameMap?            @relation(fields: [mapId], references: [id])
+  npcs               StoryPhaseNpc[]
+  hostiles           StoryPhaseHostile[]
+  dialogueNodes      StoryDialogueNode[]
+
+  @@unique([storyId, slug])
+}
+
+model StoryPhaseNpc {
+  id         String          @id @default(cuid())
+  phaseId    String
+  npcId      String
+  sortOrder  Int             @default(0)
+
+  phase      StoryPhase      @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  npc        NpcCatalogEntry @relation(fields: [npcId], references: [id])
+
+  @@unique([phaseId, npcId])
+}
+
+model StoryPhaseHostile {
+  id         String              @id @default(cuid())
+  phaseId    String
+  hostileId  String
+  sortOrder  Int                 @default(0)
+
+  phase      StoryPhase          @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  hostile    HostileCatalogEntry @relation(fields: [hostileId], references: [id])
+
+  @@unique([phaseId, hostileId])
+}
+
+model StoryDialogueNode {
+  id             String          @id @default(cuid())
+  phaseId        String
+  slug           String
+  nodeType       StoryNodeType
+  triggerNodeId  String?
+  npcId          String?
+  rememberText   String?
+  turnsJson      String
+  sortOrder      Int             @default(0)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  phase          StoryPhase      @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  npc            NpcCatalogEntry? @relation(fields: [npcId], references: [id])
+
+  @@unique([phaseId, slug])
+}
+
+model ActionCatalogEntry {
+  id              String   @id @default(cuid())
+  sortOrder       Int      @default(0)
+  nome            String
+  type            String
+  file            String
+  rotateIcon      Int?
+  frequencia      Int?
+  restricaoClasse String?
+  iconAssetId     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  iconAsset       Asset?   @relation(fields: [iconAssetId], references: [id])
+
+  @@unique([nome, type, sortOrder])
+}
+
+model ClassCatalogEntry {
+  id                 String   @id @default(cuid())
+  classKey           String   @unique
+  name               String
+  iconFile           String?
+  description        String?
+  hp                 Int?
+  armor              Int?
+  attackType         String?
+  baseAttackPoints   Int?
+  imgProjetil        String?
+  meleeAnimationId   String?
+  targetAnimationId  String?
+  iconAssetId        String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  iconAsset          Asset?   @relation(fields: [iconAssetId], references: [id])
+  meleeAnimation     Animation? @relation("ClassMeleeAnimation", fields: [meleeAnimationId], references: [id])
+  targetAnimation    Animation? @relation("ClassTargetAnimation", fields: [targetAnimationId], references: [id])
+  heroEntries        HeroCatalogEntry[]
+  hostileEntries     HostileCatalogEntry[]
+}
+
+model HeroCatalogEntry {
+  id               String   @id @default(cuid())
+  sortOrder        Int      @default(0)
+  name             String
+  classKey         String
+  role             String?  @default("player")
+  team             String?  @default("player")
+  file             String
+  hp               Int      @default(100)
+  mp               Int?
+  attack           Int?
+  defense          Int?
+  speed            Int?
+  skillsJson       String?
+  battlerAssetId   String?
+  characterAssetId String?
+  selfieAssetId    String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  battlerAsset     Asset?   @relation("HeroBattlerAsset", fields: [battlerAssetId], references: [id])
+  characterAsset   Asset?   @relation("HeroCharacterAsset", fields: [characterAssetId], references: [id])
+  selfieAsset      Asset?   @relation("HeroSelfieAsset", fields: [selfieAssetId], references: [id])
+  classEntry       ClassCatalogEntry @relation(fields: [classKey], references: [classKey])
+
+  @@unique([name, classKey, file])
+}
+
+model RandomDialogEntry {
+  id         String   @id @default(cuid())
+  sortOrder  Int      @unique
+  text       String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model OffenseCatalogEntry {
+  id         String   @id @default(cuid())
+  sortOrder  Int      @unique
+  text       String
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model TeamEntry {
+  id              String   @id @default(cuid())
+  slot            String   @unique
+  storyId         String?
+  sourceUpdatedAt DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  members         TeamMemberEntry[]
+  adventures      AdventureEntry[]
+}
+
+model TeamMemberEntry {
+  id         String   @id @default(cuid())
+  teamId      String
+  sortOrder   Int      @default(0)
+  name        String
+  classKey    String?
+  characterId Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team        TeamEntry @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  @@unique([teamId, sortOrder])
+}
+
+model AdventureEntry {
+  id                   String   @id @default(cuid())
+  sourceId             String   @unique
+  slot                 String?
+  teamSlot             String?
+  storyId              String?
+  currentMap           String?
+  currentDialog        String?
+  currentDialogStep    String?
+  startedDialogStepsJson String?
+  sourceUpdatedAt      DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  team                 TeamEntry? @relation(fields: [teamSlot], references: [slot])
+}
+
+model UnitCatalogEntry {
+  id             String   @id @default(cuid())
+  sortOrder      Int      @default(0)
+  file           String   @unique
+  name           String
+  classKey       String?
+  role           String?
+  team           String?
+  hp             Int?
+  mp             Int?
+  attack         Int?
+  defense        Int?
+  speed          Int?
+  skillsJson     String?
+  battlerAssetId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  battlerAsset   Asset?   @relation(fields: [battlerAssetId], references: [id])
+}
+
+model NpcCatalogEntry {
+  id               String   @id @default(cuid())
+  file             String   @unique @map("sourceId")
+  nome             String
+  idade            Int?
+  profissao        String?
+  sexo             String?
+  educacao         Int?
+  humor            Int?
+  descricao        String?
+  frameWidth       Int?
+  frameHeight      Int?
+  battlerAssetId   String?
+  characterAssetId String?
+  selfieAssetId    String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  battlerAsset     Asset?   @relation("NpcBattlerAsset", fields: [battlerAssetId], references: [id])
+  characterAsset   Asset?   @relation("NpcCharacterAsset", fields: [characterAssetId], references: [id])
+  selfieAsset      Asset?   @relation("NpcSelfieAsset", fields: [selfieAssetId], references: [id])
+  mapObjects       MapObject[]
+  storyPhaseEntries StoryPhaseNpc[]
+  dialogueNodes    StoryDialogueNode[]
+}
+
+model Animation {
+  id             String   @id @default(cuid())
+  name           String   @default("")
+  file           String
+  frameWidth     Int?
+  frameHeight    Int?
+  frameCount     Int?     @default(1)
+  sheetColumns   Int?
+  sheetRows      Int?
+  frameOrder     String?  @default("ltr-ttb")
+  startX         Int?
+  startY         Int?
+  frameSpacingX  Int?
+  frameSpacingY  Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  meleeUsers     HostileCatalogEntry[] @relation("HostileMeleeAnimation")
+  targetUsers    HostileCatalogEntry[] @relation("HostileTargetAnimation")
+  classMeleeUsers ClassCatalogEntry[] @relation("ClassMeleeAnimation")
+  classTargetUsers ClassCatalogEntry[] @relation("ClassTargetAnimation")
+
+  @@unique([name, file])
+}
+
+model HostileCatalogEntry {
+  id               String   @id @default(cuid())
+  file             String   @unique @map("sourceId")
+  nome             String
+  classKey         String?
+  hostileClass     String   @default("melee")
+  idade            Int?
+  profissao        String?
+  sexo             String?
+  educacao         Int?
+  humor            Int?
+  descricao        String?
+  hp               Int      @default(50)
+  armor            Int?
+  baseAttackPoints Int?
+  imgProjetil      String?
+  meleeAnimationId String?
+  targetAnimationId String?
+  frameWidth       Int?
+  frameHeight      Int?
+  battlerAssetId   String?
+  characterAssetId String?
+  selfieAssetId    String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  battlerAsset     Asset?   @relation("HostileBattlerAsset", fields: [battlerAssetId], references: [id])
+  characterAsset   Asset?   @relation("HostileCharacterAsset", fields: [characterAssetId], references: [id])
+  selfieAsset      Asset?   @relation("HostileSelfieAsset", fields: [selfieAssetId], references: [id])
+  meleeAnimation   Animation? @relation("HostileMeleeAnimation", fields: [meleeAnimationId], references: [id])
+  targetAnimation  Animation? @relation("HostileTargetAnimation", fields: [targetAnimationId], references: [id])
+  classEntry       ClassCatalogEntry? @relation(fields: [classKey], references: [classKey])
+  mapObjects       MapObject[]
+  storyPhaseEntries StoryPhaseHostile[]
+}

@@ -3,3 +3,7 @@ node_modules
 # ignore dependencies
 node_modules/
 *.log
+
+# environment files
+.env
+.adminjs/

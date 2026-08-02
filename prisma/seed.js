@@ -1,0 +1,1 @@
+console.log('Seed ainda nao implementado. Primeiro passo: importar os JSONs atuais do jogo para o banco.');
