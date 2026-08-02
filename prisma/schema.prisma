@@ -177,6 +177,7 @@ model StoryPhaseHostile {
   id         String              @id @default(cuid())
   phaseId    String
   hostileId  String
+  quantity   Int                 @default(1)
   sortOrder  Int                 @default(0)
 
   phase      StoryPhase          @relation(fields: [phaseId], references: [id], onDelete: Cascade)

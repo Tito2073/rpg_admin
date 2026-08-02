@@ -2,7 +2,16 @@ const path = require('path');
 const fs = require('fs');
 
 const adminRoot = path.resolve(__dirname, '..', '..');
-const workspaceRoot = path.resolve(adminRoot, process.env.GAME_ROOT || '../rpg_turno');
+const workspaceRootCandidates = [
+  process.env.GAME_ROOT,
+  '../rpg-turnos',
+  '../rpg_turno',
+].filter(Boolean);
+
+const workspaceRoot = workspaceRootCandidates
+  .map((candidate) => path.resolve(adminRoot, candidate))
+  .find((candidatePath) => fs.existsSync(path.join(candidatePath, 'data')) && fs.existsSync(path.join(candidatePath, 'assets')))
+  || path.resolve(adminRoot, '../rpg-turnos');
 const dataDir = path.join(workspaceRoot, 'data');
 const assetsDir = path.join(workspaceRoot, 'assets');
 

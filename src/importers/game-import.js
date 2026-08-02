@@ -573,18 +573,47 @@ async function importStories(prisma) {
       }
 
       const hostiles = Array.isArray(phase.hostiles) ? phase.hostiles : [];
-      const seenHostileIds = new Set();
+      const hostileAggregateById = new Map();
       for (let hostileOrder = 0; hostileOrder < hostiles.length; hostileOrder += 1) {
-        const hostile = await resolveHostileByBattler(prisma, hostiles[hostileOrder]);
-        if (!hostile || seenHostileIds.has(hostile.id)) {
+        const rawEntry = hostiles[hostileOrder];
+        const hostileRef = typeof rawEntry === 'string'
+          ? rawEntry
+          : (typeof rawEntry?.id === 'string' && rawEntry.id.trim()
+            ? rawEntry.id.trim()
+            : typeof rawEntry?.hostileId === 'string' && rawEntry.hostileId.trim()
+              ? rawEntry.hostileId.trim()
+              : typeof rawEntry?.file === 'string' && rawEntry.file.trim()
+                ? rawEntry.file.trim()
+                : null);
+
+        const hostile = await resolveHostileByBattler(prisma, hostileRef);
+        if (!hostile) {
           continue;
         }
-        seenHostileIds.add(hostile.id);
+
+        const parsedCount = Number.parseInt(rawEntry?.count ?? rawEntry?.quantity, 10);
+        const normalizedCount = Number.isInteger(parsedCount) && parsedCount > 0 ? parsedCount : 1;
+        const existing = hostileAggregateById.get(hostile.id);
+
+        if (existing) {
+          existing.quantity += normalizedCount;
+          continue;
+        }
+
+        hostileAggregateById.set(hostile.id, {
+          hostileId: hostile.id,
+          sortOrder: hostileOrder,
+          quantity: normalizedCount,
+        });
+      }
+
+      for (const hostileEntry of hostileAggregateById.values()) {
         await prisma.storyPhaseHostile.create({
           data: {
             phaseId: createdPhase.id,
-            hostileId: hostile.id,
-            sortOrder: hostileOrder,
+            hostileId: hostileEntry.hostileId,
+            sortOrder: hostileEntry.sortOrder,
+            quantity: hostileEntry.quantity,
           },
         });
       }

@@ -164,6 +164,39 @@ function exportOffenses(offenses) {
 
 function exportStory(story) {
   const phases = [...story.phases].sort((a, b) => a.position - b.position);
+
+  const buildPhaseHostiles = (phase) => phase.hostiles
+    .map((entry) => {
+      const hostileId = entry.hostile.battlerAsset?.fileName || entry.hostile.file;
+      const parsedQuantity = Number.parseInt(entry.quantity, 10);
+      const quantity = Number.isInteger(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
+
+      if (!hostileId) {
+        return null;
+      }
+
+      return {
+        id: hostileId,
+        count: quantity,
+      };
+    })
+    .filter(Boolean);
+
+  const buildHostileRespawnConfig = (phase) => {
+    const parsed = parseJsonOrDefault(phase.hostileRespawnJson, null);
+    const zone = typeof parsed?.zone === 'string' && parsed.zone.trim()
+      ? parsed.zone.trim()
+      : null;
+
+    if (!zone) {
+      return null;
+    }
+
+    return {
+      zone,
+    };
+  };
+
   return {
     id: story.slug,
     title: story.title,
@@ -175,9 +208,9 @@ function exportStory(story) {
       mapTypeId: phase.mapType?.slug || null,
       hostile: phase.hostile,
       hostileIntroDialogue: phase.hostileIntroText || null,
-      hostileRespawn: parseJsonOrDefault(phase.hostileRespawnJson, null),
+      hostileRespawn: buildHostileRespawnConfig(phase),
       npcs: phase.npcs.map((entry) => entry.npc.battlerAsset?.fileName || entry.npc.file),
-      hostiles: phase.hostiles.map((entry) => entry.hostile.battlerAsset?.fileName || entry.hostile.file),
+      hostiles: buildPhaseHostiles(phase),
       dialogueSequence: {
         id: `${phase.slug}-dialogues`,
         steps: [...phase.dialogueNodes]

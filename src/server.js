@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+require('dotenv').config();
 const { PrismaClient } = require('@prisma/client');
 const { exportGameData, exportByTargets } = require('./exporters/game-export');
 const { importGameData } = require('./importers/game-import');
@@ -199,9 +200,47 @@ async function buildStoryPhaseHostileSelectOptions() {
     label: `${hostile.nome || hostile.file} (${hostile.file})`,
   }));
 
+  const phaseIdByLabel = {};
+  const phaseIdBySlug = {};
+  const phaseIdByTitle = {};
+  phases.forEach((phase) => {
+    const label = `${phase.story?.slug || 'story'} / ${phase.slug} - ${phase.title}`;
+    phaseIdByLabel[label] = phase.id;
+    if (phase.slug) {
+      phaseIdBySlug[phase.slug] = phase.id;
+    }
+    if (phase.title) {
+      phaseIdByTitle[phase.title] = phase.id;
+    }
+  });
+
+  const hostileIdByLabel = {};
+  const hostileIdByName = {};
+  const hostileIdByFile = {};
+  hostiles.forEach((hostile) => {
+    const label = `${hostile.nome || hostile.file} (${hostile.file})`;
+    hostileIdByLabel[label] = hostile.id;
+    if (hostile.nome) {
+      hostileIdByName[hostile.nome] = hostile.id;
+    }
+    if (hostile.file) {
+      hostileIdByFile[hostile.file] = hostile.id;
+    }
+  });
+
   return {
     phaseOptions,
     hostileOptions,
+    phaseMaps: {
+      byLabel: phaseIdByLabel,
+      bySlug: phaseIdBySlug,
+      byTitle: phaseIdByTitle,
+    },
+    hostileMaps: {
+      byLabel: hostileIdByLabel,
+      byName: hostileIdByName,
+      byFile: hostileIdByFile,
+    },
   };
 }
 
@@ -419,13 +458,11 @@ function buildAdmin(
         return null;
       }
 
-      const count = Number.parseInt(parsed.count, 10);
       const zone = typeof parsed.zone === 'string' && parsed.zone.trim()
         ? parsed.zone.trim()
         : 'last-third';
 
       return {
-        count: Number.isInteger(count) && count > 0 ? count : null,
         zone,
       };
     } catch {
@@ -439,7 +476,6 @@ function buildAdmin(
     }
 
     const parsed = parseHostileRespawnJson(record.params.hostileRespawnJson);
-    record.params.hostileRespawnCount = parsed?.count ?? '';
     record.params.hostileRespawnZone = parsed?.zone || 'last-third';
   };
 
@@ -463,22 +499,11 @@ function buildAdmin(
     }
 
     const payload = { ...(request.payload || {}) };
-    const parsedCount = Number.parseInt(payload.hostileRespawnCount, 10);
-    const hasValidCount = Number.isInteger(parsedCount) && parsedCount > 0;
     const zone = typeof payload.hostileRespawnZone === 'string' && payload.hostileRespawnZone.trim()
       ? payload.hostileRespawnZone.trim()
       : 'last-third';
 
-    if (hasValidCount) {
-      payload.hostileRespawnJson = JSON.stringify({
-        count: parsedCount,
-        zone,
-      });
-    } else {
-      payload.hostileRespawnJson = null;
-    }
-
-    delete payload.hostileRespawnCount;
+    payload.hostileRespawnJson = JSON.stringify({ zone });
     delete payload.hostileRespawnZone;
 
     return {
@@ -493,23 +518,334 @@ function buildAdmin(
     }
 
     const payload = { ...(request.payload || {}) };
-    const phaseId = typeof payload.phaseId === 'string' ? payload.phaseId.trim() : '';
-    const hostileId = typeof payload.hostileId === 'string' ? payload.hostileId.trim() : '';
+    const resolvePhaseId = (value) => {
+      const normalized = normalizeIdValue(value);
+      if (!normalized) {
+        return '';
+      }
 
-    if (phaseId) {
-      payload.phase = { connect: { id: phaseId } };
+      if (storyPhaseHostileSelectOptions.phaseOptions.some((entry) => entry.value === normalized)) {
+        return normalized;
+      }
+
+      return storyPhaseHostileSelectOptions.phaseMaps.byLabel[normalized]
+        || storyPhaseHostileSelectOptions.phaseMaps.bySlug[normalized]
+        || storyPhaseHostileSelectOptions.phaseMaps.byTitle[normalized]
+        || '';
+    };
+
+    const resolveHostileId = (value) => {
+      const normalized = normalizeIdValue(value);
+      if (!normalized) {
+        return '';
+      }
+
+      if (storyPhaseHostileSelectOptions.hostileOptions.some((entry) => entry.value === normalized)) {
+        return normalized;
+      }
+
+      return storyPhaseHostileSelectOptions.hostileMaps.byLabel[normalized]
+        || storyPhaseHostileSelectOptions.hostileMaps.byName[normalized]
+        || storyPhaseHostileSelectOptions.hostileMaps.byFile[normalized]
+        || '';
+    };
+
+    const phaseIdFromPayload = resolvePhaseId(payload.phaseId)
+      || resolvePhaseId(payload.phase)
+      || resolvePhaseId(payload['phase.id'])
+      || '';
+    const hostileIdFromPayload = resolveHostileId(payload.hostileId)
+      || resolveHostileId(payload.hostile)
+      || resolveHostileId(payload['hostile.id'])
+      || '';
+
+    const recordId = normalizeIdValue(request?.params?.recordId)
+      || normalizeIdValue(payload.id)
+      || null;
+
+    let currentRecord = null;
+    if (recordId) {
+      currentRecord = await prisma.storyPhaseHostile.findUnique({
+        where: { id: recordId },
+        select: { phaseId: true, hostileId: true, quantity: true },
+      });
     }
 
-    if (hostileId) {
-      payload.hostile = { connect: { id: hostileId } };
+    const resolvedPhaseId = phaseIdFromPayload || currentRecord?.phaseId || '';
+    const resolvedHostileId = hostileIdFromPayload || currentRecord?.hostileId || '';
+    const parsedQuantity = Number.parseInt(payload.quantity, 10);
+    const resolvedQuantity = Number.isInteger(parsedQuantity) && parsedQuantity > 0
+      ? parsedQuantity
+      : Number.isInteger(currentRecord?.quantity) && currentRecord.quantity > 0
+        ? currentRecord.quantity
+        : 1;
+
+    if (resolvedPhaseId) {
+      payload.phase = { connect: { id: resolvedPhaseId } };
     }
+
+    if (resolvedHostileId) {
+      payload.hostile = { connect: { id: resolvedHostileId } };
+    }
+
+    payload.quantity = resolvedQuantity;
 
     delete payload.phaseId;
     delete payload.hostileId;
+    delete payload['phase.id'];
+    delete payload['hostile.id'];
+    delete payload.phaseLabel;
+    delete payload.hostileLabel;
 
     return {
       ...request,
       payload,
+    };
+  };
+
+  const hydrateStoryPhaseHostileRecord = (record) => {
+    if (!record?.params) {
+      return;
+    }
+
+    record.params.phaseId = record.params.phaseId || record.params.phase || record.populated?.phase?.id || '';
+    record.params.hostileId = record.params.hostileId || record.params.hostile || record.populated?.hostile?.id || '';
+    record.params.phaseLabel = record.params.phaseLabel
+      || record.populated?.phase?.title
+      || record.populated?.phase?.params?.slug
+      || record.params.phaseId
+      || '';
+    record.params.hostileLabel = record.params.hostileLabel
+      || record.populated?.hostile?.title
+      || record.populated?.hostile?.params?.nome
+      || record.params.hostileId
+      || '';
+  };
+
+  const hydrateStoryPhaseHostileAfterHook = async (response) => {
+    if (response?.record) {
+      hydrateStoryPhaseHostileRecord(response.record);
+    }
+
+    if (Array.isArray(response?.records)) {
+      response.records.forEach((record) => {
+        hydrateStoryPhaseHostileRecord(record);
+      });
+    }
+
+    return response;
+  };
+
+  const saveStoryPhaseHostileRecord = async (request, response, context) => {
+    const { record, resource, currentAdmin, h } = context;
+
+    const emptyRecord = resource.build({});
+    const currentOrEmptyRecord = record || emptyRecord;
+
+    if (request?.method === 'get') {
+      return {
+        record: currentOrEmptyRecord.toJSON(currentAdmin),
+      };
+    }
+
+    const payload = { ...(request?.payload || {}) };
+    const recordId = record?.id?.() || normalizeIdValue(payload.id) || null;
+    const currentRecord = recordId
+      ? await prisma.storyPhaseHostile.findUnique({
+          where: { id: recordId },
+          select: { phaseId: true, hostileId: true, quantity: true, sortOrder: true },
+        })
+      : null;
+
+    const phaseId = normalizeIdValue(payload.phaseId)
+      || normalizeIdValue(payload.phase)
+      || currentRecord?.phaseId
+      || null;
+    const hostileId = normalizeIdValue(payload.hostileId)
+      || normalizeIdValue(payload.hostile)
+      || currentRecord?.hostileId
+      || null;
+
+    const quantityValue = Number.parseInt(payload.quantity, 10);
+    const quantity = Number.isInteger(quantityValue) && quantityValue > 0
+      ? quantityValue
+      : currentRecord?.quantity || 1;
+
+    const sortOrderValue = Number.parseInt(payload.sortOrder, 10);
+    const sortOrder = Number.isInteger(sortOrderValue)
+      ? sortOrderValue
+      : currentRecord?.sortOrder || 0;
+
+    if (!phaseId || !hostileId) {
+      return {
+        record: currentOrEmptyRecord.toJSON(currentAdmin),
+        notice: {
+          message: 'Phase e hostile sao obrigatorios.',
+          type: 'error',
+        },
+      };
+    }
+
+    const updated = currentRecord
+      ? await prisma.storyPhaseHostile.update({
+          where: { id: recordId },
+          data: {
+            phaseId,
+            hostileId,
+            quantity,
+            sortOrder,
+          },
+        })
+      : await prisma.storyPhaseHostile.create({
+          data: {
+            phaseId,
+            hostileId,
+            quantity,
+            sortOrder,
+          },
+        });
+
+    const populated = await prisma.storyPhaseHostile.findUnique({
+      where: { id: updated.id },
+      include: {
+        phase: { include: { story: true } },
+        hostile: true,
+      },
+    });
+
+    if (!populated) {
+      return {
+        record: currentOrEmptyRecord.toJSON(currentAdmin),
+        notice: {
+          message: 'Nao foi possivel recarregar o registro salvo.',
+          type: 'error',
+        },
+      };
+    }
+
+    const nextRecord = record;
+    if (!nextRecord) {
+      currentOrEmptyRecord.params.id = populated.id;
+      currentOrEmptyRecord.params.phaseId = populated.phaseId;
+      currentOrEmptyRecord.params.hostileId = populated.hostileId;
+      currentOrEmptyRecord.params.quantity = populated.quantity;
+      currentOrEmptyRecord.params.sortOrder = populated.sortOrder;
+      currentOrEmptyRecord.populated.phase = {
+        params: {
+          id: populated.phaseId,
+          slug: populated.phase?.slug || '',
+          title: populated.phase?.title || '',
+        },
+        title: populated.phase ? `${populated.phase.story?.slug || 'story'} / ${populated.phase.slug} - ${populated.phase.title}` : populated.phaseId,
+        toJSON: () => ({
+          params: {
+            id: populated.phaseId,
+            slug: populated.phase?.slug || '',
+            title: populated.phase?.title || '',
+          },
+          populated: {},
+          baseError: null,
+          errors: {},
+          id: populated.phaseId,
+          title: populated.phase ? `${populated.phase.story?.slug || 'story'} / ${populated.phase.slug} - ${populated.phase.title}` : populated.phaseId,
+          recordActions: [],
+          bulkActions: [],
+        }),
+      };
+      currentOrEmptyRecord.populated.hostile = {
+        params: {
+          id: populated.hostileId,
+          nome: populated.hostile?.nome || '',
+          file: populated.hostile?.file || '',
+        },
+        title: populated.hostile ? `${populated.hostile.nome || populated.hostile.file} (${populated.hostile.file})` : populated.hostileId,
+        toJSON: () => ({
+          params: {
+            id: populated.hostileId,
+            nome: populated.hostile?.nome || '',
+            file: populated.hostile?.file || '',
+          },
+          populated: {},
+          baseError: null,
+          errors: {},
+          id: populated.hostileId,
+          title: populated.hostile ? `${populated.hostile.nome || populated.hostile.file} (${populated.hostile.file})` : populated.hostileId,
+          recordActions: [],
+          bulkActions: [],
+        }),
+      };
+
+      return {
+        redirectUrl: h.resourceUrl({
+          resourceId: resource._decorated?.id() || resource.id(),
+        }),
+        notice: {
+          message: 'successfullyCreated',
+          type: 'success',
+        },
+        record: currentOrEmptyRecord.toJSON(currentAdmin),
+      };
+    }
+
+    const nextRecord = record;
+    nextRecord.params.phaseId = populated.phaseId;
+    nextRecord.params.hostileId = populated.hostileId;
+    nextRecord.params.quantity = populated.quantity;
+    nextRecord.params.sortOrder = populated.sortOrder;
+    nextRecord.populated.phase = {
+      params: {
+        id: populated.phaseId,
+        slug: populated.phase?.slug || '',
+        title: populated.phase?.title || '',
+      },
+      title: populated.phase ? `${populated.phase.story?.slug || 'story'} / ${populated.phase.slug} - ${populated.phase.title}` : populated.phaseId,
+      toJSON: () => ({
+        params: {
+          id: populated.phaseId,
+          slug: populated.phase?.slug || '',
+          title: populated.phase?.title || '',
+        },
+        populated: {},
+        baseError: null,
+        errors: {},
+        id: populated.phaseId,
+        title: populated.phase ? `${populated.phase.story?.slug || 'story'} / ${populated.phase.slug} - ${populated.phase.title}` : populated.phaseId,
+        recordActions: [],
+        bulkActions: [],
+      }),
+    };
+    nextRecord.populated.hostile = {
+      params: {
+        id: populated.hostileId,
+        nome: populated.hostile?.nome || '',
+        file: populated.hostile?.file || '',
+      },
+      title: populated.hostile ? `${populated.hostile.nome || populated.hostile.file} (${populated.hostile.file})` : populated.hostileId,
+      toJSON: () => ({
+        params: {
+          id: populated.hostileId,
+          nome: populated.hostile?.nome || '',
+          file: populated.hostile?.file || '',
+        },
+        populated: {},
+        baseError: null,
+        errors: {},
+        id: populated.hostileId,
+        title: populated.hostile ? `${populated.hostile.nome || populated.hostile.file} (${populated.hostile.file})` : populated.hostileId,
+        recordActions: [],
+        bulkActions: [],
+      }),
+    };
+
+    return {
+      redirectUrl: h.resourceUrl({
+        resourceId: resource._decorated?.id() || resource.id(),
+      }),
+      notice: {
+        message: 'successfullyUpdated',
+        type: 'success',
+      },
+      record: nextRecord.toJSON(currentAdmin),
     };
   };
 
@@ -839,7 +1175,6 @@ function buildAdmin(
           'title',
           'position',
           'hostile',
-          'hostileRespawnCount',
           'hostileRespawnZone',
           'hostileIntroText',
           'mapTypeId',
@@ -852,7 +1187,6 @@ function buildAdmin(
           'title',
           'position',
           'hostile',
-          'hostileRespawnCount',
           'hostileRespawnZone',
           'hostileIntroText',
           'mapTypeId',
@@ -880,12 +1214,6 @@ function buildAdmin(
           hostileRespawnJson: {
             isVisible: { list: false, filter: false, show: false, edit: false },
           },
-          hostileRespawnCount: {
-            type: 'number',
-            label: 'Respawn Hostiles (count)',
-            isVisible: { list: false, filter: false, show: true, edit: true },
-            description: 'Quantidade de hostiles no spawn da fase. Vazio ou <= 0 desliga respawn custom.',
-          },
           hostileRespawnZone: {
             label: 'Respawn Hostiles (zona)',
             availableValues: [
@@ -904,13 +1232,23 @@ function buildAdmin(
     {
       resource: { model: getModelByName('StoryPhaseHostile'), client: prisma },
       options: withPartialExport('StoryPhaseHostile', {
-        listProperties: ['phaseId', 'hostileId', 'sortOrder'],
+        listProperties: ['phaseLabel', 'hostileLabel', 'quantity', 'sortOrder'],
+        editProperties: ['phaseId', 'hostileId', 'quantity', 'sortOrder'],
+        showProperties: ['id', 'phaseLabel', 'hostileLabel', 'quantity', 'sortOrder'],
         actions: {
           new: {
-            before: [normalizeStoryPhaseHostilePayloadHook],
+            handler: saveStoryPhaseHostileRecord,
+            after: [hydrateStoryPhaseHostileAfterHook],
           },
           edit: {
-            before: [normalizeStoryPhaseHostilePayloadHook],
+            handler: saveStoryPhaseHostileRecord,
+            after: [hydrateStoryPhaseHostileAfterHook],
+          },
+          show: {
+            after: [hydrateStoryPhaseHostileAfterHook],
+          },
+          list: {
+            after: [hydrateStoryPhaseHostileAfterHook],
           },
         },
         properties: {
@@ -920,12 +1258,26 @@ function buildAdmin(
           hostileId: {
             availableValues: storyPhaseHostileSelectOptions.hostileOptions,
           },
-          phase: {
-            isVisible: { list: false, filter: false, show: false, edit: false },
+          phaseLabel: {
+            label: 'Phase',
+            isVisible: { list: true, filter: false, show: true, edit: false },
           },
-          hostile: {
-            isVisible: { list: false, filter: false, show: false, edit: false },
+          hostileLabel: {
+            label: 'Hostile',
+            isVisible: { list: true, filter: false, show: true, edit: false },
           },
+          quantity: {
+            type: 'number',
+            label: 'Quantidade',
+            isRequired: true,
+            props: {
+              min: 1,
+              step: 1,
+            },
+            description: 'Quantos hostiles desse tipo serao usados nesta fase.',
+          },
+          phase: hideField,
+          hostile: hideField,
         },
       }),
     },

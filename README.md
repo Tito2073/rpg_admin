@@ -16,7 +16,7 @@ Monolito Node para administrar entidades do jogo e exportar JSONs consumidos pel
 3. Rotas e scripts próprios exportam os JSONs finais para `GAME_ROOT/data`.
 4. O jogo continua lendo apenas os arquivos JSON exportados.
 
-No layout atual (pastas irmas), use `GAME_ROOT=../rpg_turno`.
+No layout atual (pastas irmas), use `GAME_ROOT=../rpg_turnos`.
 
 ## Primeiros passos
 

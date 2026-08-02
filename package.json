@@ -19,6 +19,7 @@
     "@adminjs/prisma": "^5.0.1",
     "@prisma/client": "^6.12.0",
     "adminjs": "^7.8.17",
+    "dotenv": "^17.4.2",
     "express": "^4.21.2"
   },
   "devDependencies": {
