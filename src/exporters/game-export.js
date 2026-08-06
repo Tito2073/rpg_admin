@@ -80,6 +80,24 @@ function exportClasses(classEntries) {
   }));
 }
 
+function exportActions(actions) {
+  return {
+    actions: actions
+      .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+      .map((entry) => ({
+        nome: entry.nome,
+        file: entry.iconAsset?.fileName || entry.file,
+        type: entry.type,
+        rotateIcon: entry.rotateIcon ?? null,
+        frequencia: entry.frequencia ?? undefined,
+        conditionKey: entry.conditionKey || null,
+        restricaoClasse: entry.restricaoClasse || null,
+        lootavel: entry.lootavel === true,
+        mapMode: entry.mapMode || null,
+      })),
+  };
+}
+
 function exportNpcCatalog(npcEntries) {
   return {
     npcs: npcEntries.map((entry) => ({
@@ -231,7 +249,7 @@ function exportStory(story) {
 
 async function exportGameData(prisma) {
   const canExportOffenses = typeof prisma?.offenseCatalogEntry?.findMany === 'function';
-  const [heroes, npcs, hostiles, classes, animations, mapTypes, stories, offenses] = await Promise.all([
+  const [heroes, npcs, hostiles, classes, animations, mapTypes, stories, offenses, actions] = await Promise.all([
     prisma.heroCatalogEntry.findMany({
       include: { battlerAsset: true, classEntry: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
@@ -288,6 +306,10 @@ async function exportGameData(prisma) {
           orderBy: [{ sortOrder: 'asc' }],
         })
       : Promise.resolve([]),
+    prisma.actionCatalogEntry.findMany({
+      include: { iconAsset: true },
+      orderBy: [{ sortOrder: 'asc' }, { nome: 'asc' }],
+    }),
   ]);
 
   const offensePayload = canExportOffenses
@@ -295,6 +317,7 @@ async function exportGameData(prisma) {
     : await readJson('ofensas.json', { falas: [] });
 
   await Promise.all([
+    writeJson('actions.json', exportActions(actions)),
     writeJson('classes.json', exportClasses(classes)),
     writeJson('heroes.json', exportHeroes(heroes)),
     writeJson('units.json', exportUnits(heroes)),
@@ -331,6 +354,16 @@ async function exportByTargets(prisma, targets = []) {
   }
 
   const tasks = [];
+
+  if (requested.has('actions')) {
+    tasks.push((async () => {
+      const actions = await prisma.actionCatalogEntry.findMany({
+        include: { iconAsset: true },
+        orderBy: [{ sortOrder: 'asc' }, { nome: 'asc' }],
+      });
+      await writeJson('actions.json', exportActions(actions));
+    })());
+  }
 
   if (requested.has('classes')) {
     tasks.push((async () => {

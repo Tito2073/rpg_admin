@@ -68,6 +68,20 @@ function parseFrameOrder(value) {
   return normalized || 'ltr-ttb';
 }
 
+function parseActionMapMode(value) {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (normalized === 'hostile') {
+    return 'hostile';
+  }
+  if (normalized === 'peaceful' || normalized === 'pacific' || normalized === 'pacifico') {
+    return 'peaceful';
+  }
+  if (normalized === 'all' || normalized === 'ambos') {
+    return 'all';
+  }
+  return null;
+}
+
 async function importAnimations(prisma) {
   const payload = await readJson('animations.json', { animations: [] });
   const animations = Array.isArray(payload?.animations) ? payload.animations : [];
@@ -95,6 +109,54 @@ async function importAnimations(prisma) {
         startY: parseIntegerOrNull(animation.startY) ?? 0,
         frameSpacingX: parseIntegerOrNull(animation.frameSpacingX) ?? 0,
         frameSpacingY: parseIntegerOrNull(animation.frameSpacingY) ?? 0,
+      },
+    });
+  }
+}
+
+async function importActions(prisma) {
+  const actionsPayload = await readJson('actions.json', { actions: [] });
+  const actions = Array.isArray(actionsPayload?.actions)
+    ? actionsPayload.actions
+    : Array.isArray(actionsPayload)
+      ? actionsPayload
+      : [];
+
+  await prisma.actionCatalogEntry.deleteMany();
+
+  for (let index = 0; index < actions.length; index += 1) {
+    const action = actions[index];
+    const fileName = typeof action?.file === 'string' ? action.file.trim() : '';
+    if (!fileName) {
+      continue;
+    }
+
+    const iconAsset = await upsertAsset(prisma, {
+      kind: 'icon',
+      fileName,
+      relativePath: `assets/Icons/${fileName}`,
+    });
+
+    const rotateIcon = Number.parseInt(action?.rotateIcon, 10);
+    const frequencia = Number.parseInt(action?.frequencia, 10);
+
+    await prisma.actionCatalogEntry.create({
+      data: {
+        sortOrder: index,
+        nome: typeof action?.nome === 'string' && action.nome.trim() ? action.nome.trim() : fileName,
+        type: typeof action?.type === 'string' && action.type.trim() ? action.type.trim() : 'interaction',
+        file: fileName,
+        rotateIcon: Number.isInteger(rotateIcon) ? rotateIcon : null,
+        frequencia: Number.isInteger(frequencia) ? frequencia : null,
+        conditionKey: typeof action?.conditionKey === 'string' && action.conditionKey.trim()
+          ? action.conditionKey.trim()
+          : null,
+        restricaoClasse: typeof action?.restricaoClasse === 'string' && action.restricaoClasse.trim()
+          ? action.restricaoClasse.trim()
+          : null,
+        lootavel: action?.lootavel === true,
+        mapMode: parseActionMapMode(action?.mapMode),
+        iconAssetId: iconAsset.id,
       },
     });
   }
@@ -655,6 +717,7 @@ async function importGameData(prisma) {
   await prisma.hostileCatalogEntry.deleteMany();
 
   await importAnimations(prisma);
+  await importActions(prisma);
   await importClasses(prisma);
   await importUnits(prisma);
   await importHeroes(prisma);

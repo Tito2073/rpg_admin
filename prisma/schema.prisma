@@ -213,7 +213,10 @@ model ActionCatalogEntry {
   file            String
   rotateIcon      Int?
   frequencia      Int?
+  conditionKey    String?
   restricaoClasse String?
+  lootavel        Boolean  @default(false)
+  mapMode         String?
   iconAssetId     String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

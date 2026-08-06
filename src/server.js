@@ -269,6 +269,7 @@ function buildAdmin(
 ) {
   const EXPORT_TARGETS_BY_RESOURCE = {
     Asset: ['heroes', 'units', 'npc', 'hostiles', 'map-types', 'stories'],
+    ActionCatalogEntry: ['actions'],
     ClassCatalogEntry: ['classes', 'heroes', 'units', 'hostiles'],
     HeroCatalogEntry: ['heroes', 'units'],
     NpcCatalogEntry: ['npc', 'stories'],
@@ -787,7 +788,6 @@ function buildAdmin(
       };
     }
 
-    const nextRecord = record;
     nextRecord.params.phaseId = populated.phaseId;
     nextRecord.params.hostileId = populated.hostileId;
     nextRecord.params.quantity = populated.quantity;
@@ -887,8 +887,15 @@ function buildAdmin(
     },
     {
       resource: { model: getModelByName('ActionCatalogEntry'), client: prisma },
-      options: {
+      options: withPartialExport('ActionCatalogEntry', {
         properties: {
+          mapMode: {
+            availableValues: [
+              { value: 'all', label: 'Todos' },
+              { value: 'hostile', label: 'Hostil' },
+              { value: 'peaceful', label: 'Pacifico' },
+            ],
+          },
           file: withImagePreview(assetUi.fileOptionsByKind.icon, {
             previewsByValue: assetUi.previewsByFile,
             previewKinds: ['icon'],
@@ -899,7 +906,7 @@ function buildAdmin(
           }),
           iconAssetId: hideField,
         },
-      },
+      }),
     },
     {
       resource: { model: getModelByName('ClassCatalogEntry'), client: prisma },
@@ -1309,6 +1316,7 @@ function buildAdmin(
 
 app.use(express.json({ limit: '2mb' }));
 app.use('/game-assets', express.static(assetsDir));
+app.use('/assets', express.static(assetsDir));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
