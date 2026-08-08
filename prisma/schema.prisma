@@ -55,6 +55,7 @@ model Asset {
   heroCharacters HeroCatalogEntry[]  @relation("HeroCharacterAsset")
   heroSelfies    HeroCatalogEntry[]  @relation("HeroSelfieAsset")
   unitEntries    UnitCatalogEntry[]
+  containerEntries ContainerCatalogEntry[]
   npcBattlers    NpcCatalogEntry[]   @relation("NpcBattlerAsset")
   npcCharacters  NpcCatalogEntry[]   @relation("NpcCharacterAsset")
   npcSelfies     NpcCatalogEntry[]   @relation("NpcSelfieAsset")
@@ -156,6 +157,7 @@ model StoryPhase {
   map                GameMap?            @relation(fields: [mapId], references: [id])
   npcs               StoryPhaseNpc[]
   hostiles           StoryPhaseHostile[]
+  containers         StoryPhaseContainer[]
   dialogueNodes      StoryDialogueNode[]
 
   @@unique([storyId, slug])
@@ -184,6 +186,21 @@ model StoryPhaseHostile {
   hostile    HostileCatalogEntry @relation(fields: [hostileId], references: [id])
 
   @@unique([phaseId, hostileId])
+}
+
+model StoryPhaseContainer {
+  id           String                @id @default(cuid())
+  phaseId      String
+  containerId  String
+  quantity     Int                   @default(1)
+  tileCol      Int?
+  tileRow      Int?
+  sortOrder    Int                   @default(0)
+
+  phase        StoryPhase            @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  container    ContainerCatalogEntry @relation(fields: [containerId], references: [id])
+
+  @@index([phaseId, sortOrder])
 }
 
 model StoryDialogueNode {
@@ -224,6 +241,22 @@ model ActionCatalogEntry {
   iconAsset       Asset?   @relation(fields: [iconAssetId], references: [id])
 
   @@unique([nome, type, sortOrder])
+}
+
+model ContainerCatalogEntry {
+  id          String   @id @default(cuid())
+  sortOrder   Int      @default(0)
+  file        String
+  capacity    Int      @default(1)
+  quality     Int      @default(1)
+  iconAssetId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  iconAsset   Asset?   @relation(fields: [iconAssetId], references: [id])
+  storyPhaseEntries StoryPhaseContainer[]
+
+  @@unique([file, sortOrder])
 }
 
 model ClassCatalogEntry {

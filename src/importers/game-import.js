@@ -82,6 +82,28 @@ function parseActionMapMode(value) {
   return null;
 }
 
+function clampContainerCapacity(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return 1;
+  }
+  return parsed;
+}
+
+function clampContainerQuality(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed)) {
+    return 1;
+  }
+  if (parsed < 1) {
+    return 1;
+  }
+  if (parsed > 6) {
+    return 6;
+  }
+  return parsed;
+}
+
 async function importAnimations(prisma) {
   const payload = await readJson('animations.json', { animations: [] });
   const animations = Array.isArray(payload?.animations) ? payload.animations : [];
@@ -156,6 +178,45 @@ async function importActions(prisma) {
           : null,
         lootavel: action?.lootavel === true,
         mapMode: parseActionMapMode(action?.mapMode),
+        iconAssetId: iconAsset.id,
+      },
+    });
+  }
+}
+
+async function importContainers(prisma) {
+  if (typeof prisma?.containerCatalogEntry?.create !== 'function') {
+    return;
+  }
+
+  const payload = await readJson('containers.json', { containers: [] });
+  const containers = Array.isArray(payload?.containers)
+    ? payload.containers
+    : Array.isArray(payload)
+      ? payload
+      : [];
+
+  await prisma.containerCatalogEntry.deleteMany();
+
+  for (let index = 0; index < containers.length; index += 1) {
+    const container = containers[index];
+    const fileName = typeof container?.file === 'string' ? container.file.trim() : '';
+    if (!fileName) {
+      continue;
+    }
+
+    const iconAsset = await upsertAsset(prisma, {
+      kind: 'icon',
+      fileName,
+      relativePath: `assets/Icons/${fileName}`,
+    });
+
+    await prisma.containerCatalogEntry.create({
+      data: {
+        sortOrder: index,
+        file: fileName,
+        capacity: clampContainerCapacity(container?.capacity),
+        quality: clampContainerQuality(container?.quality),
         iconAssetId: iconAsset.id,
       },
     });
@@ -543,6 +604,21 @@ async function resolveHostileByBattler(prisma, fileName) {
   });
 }
 
+async function resolveContainerByIcon(prisma, fileName) {
+  if (!fileName) {
+    return null;
+  }
+
+  return prisma.containerCatalogEntry.findFirst({
+    where: {
+      OR: [
+        { file: String(fileName) },
+        { iconAsset: { fileName: String(fileName) } },
+      ],
+    },
+  });
+}
+
 async function importStories(prisma) {
   const storyIndex = await readJson(path.join('stories', 'index.json'), { stories: [] });
   const storyEntries = Array.isArray(storyIndex?.stories) ? storyIndex.stories : [];
@@ -680,6 +756,42 @@ async function importStories(prisma) {
         });
       }
 
+      const containers = Array.isArray(phase.containers) ? phase.containers : [];
+      for (let containerOrder = 0; containerOrder < containers.length; containerOrder += 1) {
+        const rawEntry = containers[containerOrder];
+        const containerRef = typeof rawEntry === 'string'
+          ? rawEntry
+          : (typeof rawEntry?.file === 'string' && rawEntry.file.trim()
+            ? rawEntry.file.trim()
+            : typeof rawEntry?.id === 'string' && rawEntry.id.trim()
+              ? rawEntry.id.trim()
+              : typeof rawEntry?.containerId === 'string' && rawEntry.containerId.trim()
+                ? rawEntry.containerId.trim()
+                : null);
+
+        const container = await resolveContainerByIcon(prisma, containerRef);
+        if (!container) {
+          continue;
+        }
+
+        const parsedCount = Number.parseInt(rawEntry?.count ?? rawEntry?.quantity, 10);
+        const normalizedCount = Number.isInteger(parsedCount) && parsedCount > 0 ? parsedCount : 1;
+        const parsedCol = Number.parseInt(rawEntry?.col ?? rawEntry?.tileCol ?? rawEntry?.x, 10);
+        const parsedRow = Number.parseInt(rawEntry?.row ?? rawEntry?.tileRow ?? rawEntry?.y, 10);
+        const tileCol = Number.isInteger(parsedCol) ? parsedCol : null;
+        const tileRow = Number.isInteger(parsedRow) ? parsedRow : null;
+        await prisma.storyPhaseContainer.create({
+          data: {
+            phaseId: createdPhase.id,
+            containerId: container.id,
+            sortOrder: containerOrder,
+            quantity: normalizedCount,
+            tileCol,
+            tileRow,
+          },
+        });
+      }
+
       const steps = Array.isArray(phase?.dialogueSequence?.steps) ? phase.dialogueSequence.steps : [];
       for (let stepOrder = 0; stepOrder < steps.length; stepOrder += 1) {
         const step = steps[stepOrder];
@@ -718,6 +830,7 @@ async function importGameData(prisma) {
 
   await importAnimations(prisma);
   await importActions(prisma);
+  await importContainers(prisma);
   await importClasses(prisma);
   await importUnits(prisma);
   await importHeroes(prisma);

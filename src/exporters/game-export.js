@@ -98,6 +98,18 @@ function exportActions(actions) {
   };
 }
 
+function exportContainers(containers) {
+  return {
+    containers: containers
+      .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+      .map((entry) => ({
+        file: entry.iconAsset?.fileName || entry.file,
+        capacity: Number.isInteger(entry.capacity) && entry.capacity > 0 ? entry.capacity : 1,
+        quality: Number.isInteger(entry.quality) && entry.quality >= 1 && entry.quality <= 6 ? entry.quality : 1,
+      })),
+  };
+}
+
 function exportNpcCatalog(npcEntries) {
   return {
     npcs: npcEntries.map((entry) => ({
@@ -215,6 +227,34 @@ function exportStory(story) {
     };
   };
 
+  const buildPhaseContainers = (phase) => phase.containers
+    .map((entry) => {
+      const containerFile = entry.container.iconAsset?.fileName || entry.container.file;
+      const parsedQuantity = Number.parseInt(entry.quantity, 10);
+      const quantity = Number.isInteger(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
+      const tileCol = Number.parseInt(entry.tileCol, 10);
+      const tileRow = Number.parseInt(entry.tileRow, 10);
+
+      if (!containerFile) {
+        return null;
+      }
+
+      const payload = {
+        file: containerFile,
+        count: quantity,
+      };
+
+      if (Number.isInteger(tileCol)) {
+        payload.col = tileCol;
+      }
+      if (Number.isInteger(tileRow)) {
+        payload.row = tileRow;
+      }
+
+      return payload;
+    })
+    .filter(Boolean);
+
   return {
     id: story.slug,
     title: story.title,
@@ -229,6 +269,7 @@ function exportStory(story) {
       hostileRespawn: buildHostileRespawnConfig(phase),
       npcs: phase.npcs.map((entry) => entry.npc.battlerAsset?.fileName || entry.npc.file),
       hostiles: buildPhaseHostiles(phase),
+      containers: buildPhaseContainers(phase),
       dialogueSequence: {
         id: `${phase.slug}-dialogues`,
         steps: [...phase.dialogueNodes]
@@ -249,7 +290,8 @@ function exportStory(story) {
 
 async function exportGameData(prisma) {
   const canExportOffenses = typeof prisma?.offenseCatalogEntry?.findMany === 'function';
-  const [heroes, npcs, hostiles, classes, animations, mapTypes, stories, offenses, actions] = await Promise.all([
+  const canExportContainers = typeof prisma?.containerCatalogEntry?.findMany === 'function';
+  const [heroes, npcs, hostiles, classes, animations, mapTypes, stories, offenses, actions, containers] = await Promise.all([
     prisma.heroCatalogEntry.findMany({
       include: { battlerAsset: true, classEntry: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
@@ -292,6 +334,10 @@ async function exportGameData(prisma) {
               include: { hostile: { include: { battlerAsset: true } } },
               orderBy: [{ sortOrder: 'asc' }],
             },
+            containers: {
+              include: { container: { include: { iconAsset: true } } },
+              orderBy: [{ sortOrder: 'asc' }],
+            },
             dialogueNodes: {
               include: { npc: { include: { battlerAsset: true } } },
               orderBy: [{ sortOrder: 'asc' }],
@@ -310,14 +356,24 @@ async function exportGameData(prisma) {
       include: { iconAsset: true },
       orderBy: [{ sortOrder: 'asc' }, { nome: 'asc' }],
     }),
+    canExportContainers
+      ? prisma.containerCatalogEntry.findMany({
+          include: { iconAsset: true },
+          orderBy: [{ sortOrder: 'asc' }, { file: 'asc' }],
+        })
+      : Promise.resolve([]),
   ]);
 
   const offensePayload = canExportOffenses
     ? exportOffenses(offenses)
     : await readJson('ofensas.json', { falas: [] });
+  const containerPayload = canExportContainers
+    ? exportContainers(containers)
+    : await readJson('containers.json', { containers: [] });
 
   await Promise.all([
     writeJson('actions.json', exportActions(actions)),
+    writeJson('containers.json', containerPayload),
     writeJson('classes.json', exportClasses(classes)),
     writeJson('heroes.json', exportHeroes(heroes)),
     writeJson('units.json', exportUnits(heroes)),
@@ -362,6 +418,19 @@ async function exportByTargets(prisma, targets = []) {
         orderBy: [{ sortOrder: 'asc' }, { nome: 'asc' }],
       });
       await writeJson('actions.json', exportActions(actions));
+    })());
+  }
+
+  if (requested.has('containers')) {
+    tasks.push((async () => {
+      const canExportContainers = typeof prisma?.containerCatalogEntry?.findMany === 'function';
+      const payload = canExportContainers
+        ? exportContainers(await prisma.containerCatalogEntry.findMany({
+            include: { iconAsset: true },
+            orderBy: [{ sortOrder: 'asc' }, { file: 'asc' }],
+          }))
+        : await readJson('containers.json', { containers: [] });
+      await writeJson('containers.json', payload);
     })());
   }
 
@@ -462,6 +531,10 @@ async function exportByTargets(prisma, targets = []) {
               },
               hostiles: {
                 include: { hostile: { include: { battlerAsset: true } } },
+                orderBy: [{ sortOrder: 'asc' }],
+              },
+              containers: {
+                include: { container: { include: { iconAsset: true } } },
                 orderBy: [{ sortOrder: 'asc' }],
               },
               dialogueNodes: {

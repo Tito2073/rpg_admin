@@ -244,6 +244,66 @@ async function buildStoryPhaseHostileSelectOptions() {
   };
 }
 
+async function buildStoryPhaseContainerSelectOptions() {
+  const [phases, containers] = await Promise.all([
+    prisma.storyPhase.findMany({
+      include: { story: true },
+      orderBy: [{ story: { slug: 'asc' } }, { position: 'asc' }, { slug: 'asc' }],
+    }),
+    prisma.containerCatalogEntry.findMany({
+      orderBy: [{ file: 'asc' }],
+    }),
+  ]);
+
+  const phaseOptions = phases.map((phase) => ({
+    value: phase.id,
+    label: `${phase.story?.slug || 'story'} / ${phase.slug} - ${phase.title}`,
+  }));
+
+  const containerOptions = containers.map((container) => ({
+    value: container.id,
+    label: `${container.file} (cap ${container.capacity || 1}, q${container.quality || 1})`,
+  }));
+
+  const phaseIdByLabel = {};
+  const phaseIdBySlug = {};
+  const phaseIdByTitle = {};
+  phases.forEach((phase) => {
+    const label = `${phase.story?.slug || 'story'} / ${phase.slug} - ${phase.title}`;
+    phaseIdByLabel[label] = phase.id;
+    if (phase.slug) {
+      phaseIdBySlug[phase.slug] = phase.id;
+    }
+    if (phase.title) {
+      phaseIdByTitle[phase.title] = phase.id;
+    }
+  });
+
+  const containerIdByLabel = {};
+  const containerIdByFile = {};
+  containers.forEach((container) => {
+    const label = `${container.file} (cap ${container.capacity || 1}, q${container.quality || 1})`;
+    containerIdByLabel[label] = container.id;
+    if (container.file) {
+      containerIdByFile[container.file] = container.id;
+    }
+  });
+
+  return {
+    phaseOptions,
+    containerOptions,
+    phaseMaps: {
+      byLabel: phaseIdByLabel,
+      bySlug: phaseIdBySlug,
+      byTitle: phaseIdByTitle,
+    },
+    containerMaps: {
+      byLabel: containerIdByLabel,
+      byFile: containerIdByFile,
+    },
+  };
+}
+
 function buildAnimationFileOptions() {
   const animationDir = path.join(assetsDir, 'Animations');
   const fileNames = fs.existsSync(animationDir)
@@ -263,13 +323,15 @@ function buildAdmin(
   animationUi,
   classKeySelectOptions,
   storyPhaseHostileSelectOptions,
+  storyPhaseContainerSelectOptions,
   assetSelectWithPreviewComponent,
   battlerListThumbComponent,
   componentLoader
 ) {
   const EXPORT_TARGETS_BY_RESOURCE = {
-    Asset: ['heroes', 'units', 'npc', 'hostiles', 'map-types', 'stories'],
+    Asset: ['heroes', 'units', 'npc', 'hostiles', 'containers', 'map-types', 'stories'],
     ActionCatalogEntry: ['actions'],
+    ContainerCatalogEntry: ['containers'],
     ClassCatalogEntry: ['classes', 'heroes', 'units', 'hostiles'],
     HeroCatalogEntry: ['heroes', 'units'],
     NpcCatalogEntry: ['npc', 'stories'],
@@ -280,6 +342,7 @@ function buildAdmin(
     StoryPhase: ['stories'],
     StoryPhaseNpc: ['stories'],
     StoryPhaseHostile: ['stories'],
+    StoryPhaseContainer: ['stories'],
     StoryDialogueNode: ['stories'],
     OffenseCatalogEntry: ['ofensas'],
   };
@@ -849,6 +912,325 @@ function buildAdmin(
     };
   };
 
+  const normalizeStoryPhaseContainerPayloadHook = async (request) => {
+    if (request?.method !== 'post') {
+      return request;
+    }
+
+    const payload = { ...(request.payload || {}) };
+    const resolvePhaseId = (value) => {
+      const normalized = normalizeIdValue(value);
+      if (!normalized) {
+        return '';
+      }
+
+      if (storyPhaseContainerSelectOptions.phaseOptions.some((entry) => entry.value === normalized)) {
+        return normalized;
+      }
+
+      return storyPhaseContainerSelectOptions.phaseMaps.byLabel[normalized]
+        || storyPhaseContainerSelectOptions.phaseMaps.bySlug[normalized]
+        || storyPhaseContainerSelectOptions.phaseMaps.byTitle[normalized]
+        || '';
+    };
+
+    const resolveContainerId = (value) => {
+      const normalized = normalizeIdValue(value);
+      if (!normalized) {
+        return '';
+      }
+
+      if (storyPhaseContainerSelectOptions.containerOptions.some((entry) => entry.value === normalized)) {
+        return normalized;
+      }
+
+      return storyPhaseContainerSelectOptions.containerMaps.byLabel[normalized]
+        || storyPhaseContainerSelectOptions.containerMaps.byFile[normalized]
+        || '';
+    };
+
+    const phaseIdFromPayload = resolvePhaseId(payload.phaseId)
+      || resolvePhaseId(payload.phase)
+      || resolvePhaseId(payload['phase.id'])
+      || '';
+    const containerIdFromPayload = resolveContainerId(payload.containerId)
+      || resolveContainerId(payload.container)
+      || resolveContainerId(payload['container.id'])
+      || '';
+
+    const recordId = normalizeIdValue(request?.params?.recordId)
+      || normalizeIdValue(payload.id)
+      || null;
+
+    let currentRecord = null;
+    if (recordId) {
+      currentRecord = await prisma.storyPhaseContainer.findUnique({
+        where: { id: recordId },
+        select: { phaseId: true, containerId: true, quantity: true },
+      });
+    }
+
+    const resolvedPhaseId = phaseIdFromPayload || currentRecord?.phaseId || '';
+    const resolvedContainerId = containerIdFromPayload || currentRecord?.containerId || '';
+    const parsedQuantity = Number.parseInt(payload.quantity, 10);
+    const resolvedQuantity = Number.isInteger(parsedQuantity) && parsedQuantity > 0
+      ? parsedQuantity
+      : Number.isInteger(currentRecord?.quantity) && currentRecord.quantity > 0
+        ? currentRecord.quantity
+        : 1;
+
+    if (resolvedPhaseId) {
+      payload.phase = { connect: { id: resolvedPhaseId } };
+    }
+
+    if (resolvedContainerId) {
+      payload.container = { connect: { id: resolvedContainerId } };
+    }
+
+    payload.quantity = resolvedQuantity;
+
+    delete payload.phaseId;
+    delete payload.containerId;
+    delete payload['phase.id'];
+    delete payload['container.id'];
+    delete payload.phaseLabel;
+    delete payload.containerLabel;
+
+    return {
+      ...request,
+      payload,
+    };
+  };
+
+  const hydrateStoryPhaseContainerRecord = (record) => {
+    if (!record?.params) {
+      return;
+    }
+
+    record.params.phaseId = record.params.phaseId || record.params.phase || record.populated?.phase?.id || '';
+    record.params.containerId = record.params.containerId || record.params.container || record.populated?.container?.id || '';
+    record.params.phaseLabel = record.params.phaseLabel
+      || record.populated?.phase?.title
+      || record.populated?.phase?.params?.slug
+      || record.params.phaseId
+      || '';
+    record.params.containerLabel = record.params.containerLabel
+      || record.populated?.container?.title
+      || record.populated?.container?.params?.file
+      || record.params.containerId
+      || '';
+  };
+
+  const hydrateStoryPhaseContainerAfterHook = async (response) => {
+    if (response?.record) {
+      hydrateStoryPhaseContainerRecord(response.record);
+    }
+
+    if (Array.isArray(response?.records)) {
+      response.records.forEach((record) => {
+        hydrateStoryPhaseContainerRecord(record);
+      });
+    }
+
+    return response;
+  };
+
+  const saveStoryPhaseContainerRecord = async (request, response, context) => {
+    const { record, resource, currentAdmin, h } = context;
+
+    const emptyRecord = resource.build({});
+    const currentOrEmptyRecord = record || emptyRecord;
+
+    if (request?.method === 'get') {
+      return {
+        record: currentOrEmptyRecord.toJSON(currentAdmin),
+      };
+    }
+
+    const payload = { ...(request?.payload || {}) };
+    const resolveConnectedId = (value) => {
+      if (!value || typeof value !== 'object') {
+        return null;
+      }
+
+      if (typeof value.connect?.id === 'string' && value.connect.id.trim()) {
+        return value.connect.id.trim();
+      }
+
+      return null;
+    };
+    const recordId = record?.id?.() || normalizeIdValue(payload.id) || null;
+    const currentRecord = recordId
+      ? await prisma.storyPhaseContainer.findUnique({
+          where: { id: recordId },
+          select: { phaseId: true, containerId: true, quantity: true, tileCol: true, tileRow: true, sortOrder: true },
+        })
+      : null;
+
+    const phaseId = normalizeIdValue(payload.phaseId)
+      || normalizeIdValue(payload.phase)
+      || resolveConnectedId(payload.phase)
+      || currentRecord?.phaseId
+      || null;
+    const containerId = normalizeIdValue(payload.containerId)
+      || normalizeIdValue(payload.container)
+      || resolveConnectedId(payload.container)
+      || currentRecord?.containerId
+      || null;
+
+    const quantityValue = Number.parseInt(payload.quantity, 10);
+    const quantity = Number.isInteger(quantityValue) && quantityValue > 0
+      ? quantityValue
+      : currentRecord?.quantity || 1;
+
+    const tileColValue = Number.parseInt(payload.tileCol, 10);
+    const tileCol = Number.isInteger(tileColValue)
+      ? tileColValue
+      : Number.isInteger(currentRecord?.tileCol)
+        ? currentRecord.tileCol
+        : null;
+
+    const tileRowValue = Number.parseInt(payload.tileRow, 10);
+    const tileRow = Number.isInteger(tileRowValue)
+      ? tileRowValue
+      : Number.isInteger(currentRecord?.tileRow)
+        ? currentRecord.tileRow
+        : null;
+
+    const sortOrderValue = Number.parseInt(payload.sortOrder, 10);
+    const sortOrder = Number.isInteger(sortOrderValue)
+      ? sortOrderValue
+      : currentRecord?.sortOrder || 0;
+
+    if (!phaseId || !containerId) {
+      return {
+        record: currentOrEmptyRecord.toJSON(currentAdmin),
+        notice: {
+          message: 'Phase e container sao obrigatorios.',
+          type: 'error',
+        },
+      };
+    }
+
+    const updated = currentRecord
+      ? await prisma.storyPhaseContainer.update({
+          where: { id: recordId },
+          data: {
+            phaseId,
+            containerId,
+            quantity,
+            tileCol,
+            tileRow,
+            sortOrder,
+          },
+        })
+      : await prisma.storyPhaseContainer.create({
+          data: {
+            phaseId,
+            containerId,
+            quantity,
+            tileCol,
+            tileRow,
+            sortOrder,
+          },
+        });
+
+    const populated = await prisma.storyPhaseContainer.findUnique({
+      where: { id: updated.id },
+      include: {
+        phase: { include: { story: true } },
+        container: true,
+      },
+    });
+
+    if (!populated) {
+      return {
+        record: currentOrEmptyRecord.toJSON(currentAdmin),
+        notice: {
+          message: 'Nao foi possivel recarregar o registro salvo.',
+          type: 'error',
+        },
+      };
+    }
+
+    const phaseTitle = populated.phase
+      ? `${populated.phase.story?.slug || 'story'} / ${populated.phase.slug} - ${populated.phase.title}`
+      : populated.phaseId;
+    const containerTitle = populated.container
+      ? `${populated.container.file} (cap ${populated.container.capacity || 1}, q${populated.container.quality || 1})`
+      : populated.containerId;
+
+    const nextRecord = record;
+    if (!nextRecord) {
+      currentOrEmptyRecord.params.id = populated.id;
+      currentOrEmptyRecord.params.phaseId = populated.phaseId;
+      currentOrEmptyRecord.params.containerId = populated.containerId;
+      currentOrEmptyRecord.params.quantity = populated.quantity;
+      currentOrEmptyRecord.params.tileCol = populated.tileCol;
+      currentOrEmptyRecord.params.tileRow = populated.tileRow;
+      currentOrEmptyRecord.params.sortOrder = populated.sortOrder;
+      currentOrEmptyRecord.populated.phase = {
+        params: {
+          id: populated.phaseId,
+          slug: populated.phase?.slug || '',
+          title: populated.phase?.title || '',
+        },
+        title: phaseTitle,
+      };
+      currentOrEmptyRecord.populated.container = {
+        params: {
+          id: populated.containerId,
+          file: populated.container?.file || '',
+        },
+        title: containerTitle,
+      };
+
+      return {
+        redirectUrl: h.resourceUrl({
+          resourceId: resource._decorated?.id() || resource.id(),
+        }),
+        notice: {
+          message: 'successfullyCreated',
+          type: 'success',
+        },
+        record: currentOrEmptyRecord.toJSON(currentAdmin),
+      };
+    }
+
+    nextRecord.params.phaseId = populated.phaseId;
+    nextRecord.params.containerId = populated.containerId;
+    nextRecord.params.quantity = populated.quantity;
+    nextRecord.params.tileCol = populated.tileCol;
+    nextRecord.params.tileRow = populated.tileRow;
+    nextRecord.params.sortOrder = populated.sortOrder;
+    nextRecord.populated.phase = {
+      params: {
+        id: populated.phaseId,
+        slug: populated.phase?.slug || '',
+        title: populated.phase?.title || '',
+      },
+      title: phaseTitle,
+    };
+    nextRecord.populated.container = {
+      params: {
+        id: populated.containerId,
+        file: populated.container?.file || '',
+      },
+      title: containerTitle,
+    };
+
+    return {
+      redirectUrl: h.resourceUrl({
+        resourceId: resource._decorated?.id() || resource.id(),
+      }),
+      notice: {
+        message: 'successfullyUpdated',
+        type: 'success',
+      },
+      record: nextRecord.toJSON(currentAdmin),
+    };
+  };
+
   const withImagePreview = (availableValues, custom = {}, overrides = {}) => ({
     availableValues,
     custom: {
@@ -879,6 +1261,14 @@ function buildAdmin(
 
   const hideField = { isVisible: { list: false, filter: false, show: false, edit: false } };
   const animationFileOptions = buildAnimationFileOptions();
+  const getOptionalModelByName = (modelName) => {
+    try {
+      return getModelByName(modelName);
+    } catch {
+      return null;
+    }
+  };
+  const containerCatalogModel = getOptionalModelByName('ContainerCatalogEntry');
 
   const resources = [
     {
@@ -908,6 +1298,43 @@ function buildAdmin(
         },
       }),
     },
+    ...(containerCatalogModel
+      ? [{
+          resource: { model: containerCatalogModel, client: prisma },
+          options: withPartialExport('ContainerCatalogEntry', {
+            listProperties: ['file', 'capacity', 'quality'],
+            properties: {
+              file: withImagePreview(assetUi.fileOptionsByKind.icon, {
+                previewsByValue: assetUi.previewsByFile,
+                previewKinds: ['icon'],
+                autoFillOnSelect: {
+                  byValue: assetUi.autoFillMaps.iconByFile,
+                  targets: ['iconAssetId'],
+                },
+              }),
+              capacity: {
+                type: 'number',
+                isRequired: true,
+                props: {
+                  min: 1,
+                  step: 1,
+                },
+              },
+              quality: {
+                type: 'number',
+                isRequired: true,
+                props: {
+                  min: 1,
+                  max: 6,
+                  step: 1,
+                },
+              },
+              iconAssetId: hideField,
+              iconAsset: hideField,
+            },
+          }),
+        }]
+      : []),
     {
       resource: { model: getModelByName('ClassCatalogEntry'), client: prisma },
       options: withPartialExport('ClassCatalogEntry', {
@@ -1289,6 +1716,80 @@ function buildAdmin(
       }),
     },
     {
+      resource: { model: getModelByName('StoryPhaseContainer'), client: prisma },
+      options: withPartialExport('StoryPhaseContainer', {
+        listProperties: ['phaseLabel', 'containerLabel', 'quantity', 'tileCol', 'tileRow', 'sortOrder'],
+        editProperties: ['phaseId', 'containerId', 'quantity', 'tileCol', 'tileRow', 'sortOrder'],
+        showProperties: ['id', 'phaseLabel', 'containerLabel', 'quantity', 'tileCol', 'tileRow', 'sortOrder'],
+        actions: {
+          new: {
+            before: [normalizeStoryPhaseContainerPayloadHook],
+            handler: saveStoryPhaseContainerRecord,
+            after: [hydrateStoryPhaseContainerAfterHook],
+          },
+          edit: {
+            before: [normalizeStoryPhaseContainerPayloadHook],
+            handler: saveStoryPhaseContainerRecord,
+            after: [hydrateStoryPhaseContainerAfterHook],
+          },
+          show: {
+            after: [hydrateStoryPhaseContainerAfterHook],
+          },
+          list: {
+            after: [hydrateStoryPhaseContainerAfterHook],
+          },
+        },
+        properties: {
+          phaseId: {
+            availableValues: storyPhaseContainerSelectOptions.phaseOptions,
+          },
+          containerId: {
+            availableValues: storyPhaseContainerSelectOptions.containerOptions,
+          },
+          phaseLabel: {
+            label: 'Phase',
+            isVisible: { list: true, filter: false, show: true, edit: false },
+          },
+          containerLabel: {
+            label: 'Container',
+            isVisible: { list: true, filter: false, show: true, edit: false },
+          },
+          quantity: {
+            type: 'number',
+            label: 'Quantidade',
+            isRequired: true,
+            props: {
+              min: 1,
+              step: 1,
+            },
+            description: 'Quantos containers desse tipo serao usados nesta fase.',
+          },
+          tileCol: {
+            type: 'number',
+            label: 'Coluna (tile)',
+            isRequired: false,
+            props: {
+              min: 0,
+              step: 1,
+            },
+            description: 'Posicao horizontal no mapa. Quando vazio, usa fallback de posicionamento.',
+          },
+          tileRow: {
+            type: 'number',
+            label: 'Linha (tile)',
+            isRequired: false,
+            props: {
+              min: 1,
+              step: 1,
+            },
+            description: 'Posicao vertical no mapa. Quando vazio, usa fallback de posicionamento.',
+          },
+          phase: hideField,
+          container: hideField,
+        },
+      }),
+    },
+    {
       resource: { model: getModelByName('StoryDialogueNode'), client: prisma },
       options: withPartialExport('StoryDialogueNode'),
     },
@@ -1367,6 +1868,7 @@ async function start() {
   const animationUi = await buildAnimationSelectOptions();
   const classKeySelectOptions = await buildClassKeySelectOptions();
   const storyPhaseHostileSelectOptions = await buildStoryPhaseHostileSelectOptions();
+  const storyPhaseContainerSelectOptions = await buildStoryPhaseContainerSelectOptions();
   const admin = buildAdmin(
     AdminJS,
     getModelByName,
@@ -1374,6 +1876,7 @@ async function start() {
     animationUi,
     classKeySelectOptions,
     storyPhaseHostileSelectOptions,
+    storyPhaseContainerSelectOptions,
     assetSelectWithPreviewComponent,
     battlerListThumbComponent,
     componentLoader
