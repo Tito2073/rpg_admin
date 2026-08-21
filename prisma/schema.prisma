@@ -225,15 +225,26 @@ model StoryDialogueNode {
 model ActionCatalogEntry {
   id              String   @id @default(cuid())
   sortOrder       Int      @default(0)
+  actionKey       String?  @unique
   nome            String
   type            String
   file            String
   rotateIcon      Int?
+  raridade        Int?
   frequencia      Int?
   conditionKey    String?
   restricaoClasse String?
   lootavel        Boolean  @default(false)
   mapMode         String?
+  targetScope     String?
+  effectType      String?
+  durationTurns   Int?
+  durationSeconds Int?
+  stackable       Boolean  @default(true)
+  stackMax        Int      @default(9)
+  effectVisual    String?
+  cooldown        Int?
+  soundCue        String?
   iconAssetId     String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

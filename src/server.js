@@ -1286,6 +1286,46 @@ function buildAdmin(
               { value: 'peaceful', label: 'Pacifico' },
             ],
           },
+          targetScope: {
+            availableValues: [
+              { value: 'self', label: 'Self' },
+              { value: 'ally', label: 'Aliado' },
+              { value: 'enemy', label: 'Inimigo' },
+              { value: 'allEnemies', label: 'Todos inimigos' },
+              { value: 'allAllies', label: 'Todos aliados' },
+              { value: 'map', label: 'Mapa' },
+              { value: 'nearest', label: 'Mais proximo' },
+            ],
+          },
+          effectType: {
+            availableValues: [
+              { value: 'damage', label: 'Dano' },
+              { value: 'heal', label: 'Cura' },
+              { value: 'buff', label: 'Buff' },
+              { value: 'debuff', label: 'Debuff' },
+              { value: 'movement', label: 'Movimento' },
+              { value: 'utility', label: 'Utilitario' },
+              { value: 'interaction', label: 'Interacao' },
+            ],
+          },
+          raridade: {
+            availableValues: [
+              { value: 3, label: 'Comum' },
+              { value: 5, label: 'Pouco comum' },
+              { value: 7, label: 'Rara' },
+              { value: 9, label: 'Super rara' },
+            ],
+            description: 'Selecione a classe de raridade padrao do jogo.',
+          },
+          stackMax: {
+            type: 'number',
+            props: {
+              min: 1,
+              max: 9,
+              step: 1,
+            },
+            description: 'Empilhamento maximo no inventario (padrao do jogo: 9).',
+          },
           file: withImagePreview(assetUi.fileOptionsByKind.icon, {
             previewsByValue: assetUi.previewsByFile,
             previewKinds: ['icon'],

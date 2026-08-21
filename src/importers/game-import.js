@@ -82,6 +82,26 @@ function parseActionMapMode(value) {
   return null;
 }
 
+function parseStringOrNull(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function parseIntegerOrNullValue(value) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
+function parseBooleanWithDefault(value, defaultValue) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  return defaultValue;
+}
+
 function clampContainerCapacity(value) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -159,25 +179,37 @@ async function importActions(prisma) {
       relativePath: `assets/Icons/${fileName}`,
     });
 
-    const rotateIcon = Number.parseInt(action?.rotateIcon, 10);
-    const frequencia = Number.parseInt(action?.frequencia, 10);
+    const rotateIcon = parseIntegerOrNullValue(action?.rotateIcon);
+    const raridade = parseIntegerOrNullValue(action?.raridade);
+    const frequencia = parseIntegerOrNullValue(action?.frequencia);
+    const durationTurns = parseIntegerOrNullValue(action?.durationTurns);
+    const durationSeconds = parseIntegerOrNullValue(action?.durationSeconds);
+    const stackMax = parseIntegerOrNullValue(action?.stackMax);
+    const cooldown = parseIntegerOrNullValue(action?.cooldown);
 
     await prisma.actionCatalogEntry.create({
       data: {
         sortOrder: index,
+        actionKey: parseStringOrNull(action?.actionKey),
         nome: typeof action?.nome === 'string' && action.nome.trim() ? action.nome.trim() : fileName,
         type: typeof action?.type === 'string' && action.type.trim() ? action.type.trim() : 'interaction',
         file: fileName,
-        rotateIcon: Number.isInteger(rotateIcon) ? rotateIcon : null,
-        frequencia: Number.isInteger(frequencia) ? frequencia : null,
-        conditionKey: typeof action?.conditionKey === 'string' && action.conditionKey.trim()
-          ? action.conditionKey.trim()
-          : null,
-        restricaoClasse: typeof action?.restricaoClasse === 'string' && action.restricaoClasse.trim()
-          ? action.restricaoClasse.trim()
-          : null,
+        rotateIcon,
+        raridade,
+        frequencia,
+        conditionKey: parseStringOrNull(action?.conditionKey),
+        restricaoClasse: parseStringOrNull(action?.restricaoClasse),
         lootavel: action?.lootavel === true,
         mapMode: parseActionMapMode(action?.mapMode),
+        targetScope: parseStringOrNull(action?.targetScope),
+        effectType: parseStringOrNull(action?.effectType),
+        durationTurns,
+        durationSeconds,
+        stackable: parseBooleanWithDefault(action?.stackable, true),
+        stackMax: Number.isInteger(stackMax) && stackMax > 0 ? stackMax : 9,
+        effectVisual: parseStringOrNull(action?.effectVisual),
+        cooldown,
+        soundCue: parseStringOrNull(action?.soundCue),
         iconAssetId: iconAsset.id,
       },
     });

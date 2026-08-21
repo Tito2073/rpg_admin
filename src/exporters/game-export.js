@@ -85,15 +85,26 @@ function exportActions(actions) {
     actions: actions
       .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
       .map((entry) => ({
+        actionKey: entry.actionKey || undefined,
         nome: entry.nome,
-        file: entry.iconAsset?.fileName || entry.file,
+        file: entry.file || entry.iconAsset?.fileName,
         type: entry.type,
         rotateIcon: entry.rotateIcon ?? null,
+        raridade: entry.raridade ?? undefined,
         frequencia: entry.frequencia ?? undefined,
         conditionKey: entry.conditionKey || null,
         restricaoClasse: entry.restricaoClasse || null,
         lootavel: entry.lootavel === true,
         mapMode: entry.mapMode || null,
+        targetScope: entry.targetScope || null,
+        effectType: entry.effectType || null,
+        durationTurns: entry.durationTurns ?? null,
+        durationSeconds: entry.durationSeconds ?? null,
+        stackable: entry.stackable !== false,
+        stackMax: entry.stackMax ?? 9,
+        effectVisual: entry.effectVisual || null,
+        cooldown: entry.cooldown ?? null,
+        soundCue: entry.soundCue || null,
       })),
   };
 }
